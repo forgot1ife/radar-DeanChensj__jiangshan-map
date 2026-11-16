@@ -4261,10 +4261,21 @@ html[lang="en"] #act-toggle-pane .tp-label {
   stroke-width: 6.4px;
 }
 
+.journey-track-halo.is-overview {
+  stroke: rgba(249, 244, 234, 0.58);
+  stroke-width: 2.8px;
+}
+
 .journey-track-thread {
   stroke-width: 2.55px;
   stroke-dasharray: 8 3.8;
   opacity: 0.96;
+}
+
+.journey-track-thread.is-overview {
+  stroke-width: 1.45px;
+  stroke-dasharray: 4.6 3.2;
+  opacity: 0.64;
 }
 
 .journey-track-upcoming {

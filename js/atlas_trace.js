@@ -1315,6 +1315,16 @@
       }
     }
 
+    _isRemoteNonPersonalEvent(profile, ev) {
+      if (!ev || ev.src === 'J' || (profile && (profile.journeyKey || profile.isRelic))) {
+        return false;
+      }
+      const txt = String(ev.textZh || '');
+      return /(?:复立.{1,12}为.{1,6}王|徙之江南|密令.{1,6}击杀|遣.{1,8}(?:率|伐|攻|击|平|征|出|救|屯|筑|助)|分.{1,6}置.{1,6}郡|开.{1,6}置.{1,6}郡|平.{1,6}置.{1,6}郡|置.{1,6}(?:郡|刺史|都护)|置珠崖|置儋耳|筑居延|设伏诱击|赐.{1,6}王印)/.test(
+        txt
+      );
+    }
+
     _getSoloStepOriginCoord(activePerson, events, curIdx, curEv) {
       if (!activePerson || activePerson.isMulti || curIdx < 0 || !curEv) return null;
       const profile = activePerson.profile || {};
@@ -1322,11 +1332,14 @@
       if (isStory) {
         return Array.isArray(curEv.fromCoord) ? curEv.fromCoord : null;
       }
+      if (this._isRemoteNonPersonalEvent(profile, curEv)) {
+        return null;
+      }
       if (curIdx > 0) {
         const prevEv = events[curIdx - 1];
         const isScrapedBio = !profile.journeyKey && !profile.isRelic;
         const yearGap = prevEv ? Math.abs((curEv.year || 0) - (prevEv.year || 0)) : 0;
-        if (isScrapedBio && !curEv.fromCoord && yearGap > 6) {
+        if (isScrapedBio && !curEv.fromCoord && (yearGap > 6 || this._isRemoteNonPersonalEvent(profile, prevEv))) {
           return null;
         }
         if (
@@ -1968,7 +1981,79 @@
           this.locale === 'en' ? labelEn || this.trTerm(labelZh) : this._zh(labelZh)
         );
       };
-      if (!isMulti) {
+      if (curIdx < 0 && !isStory && !(isMulti && this.personSharedOnly)) {
+        const allTracks =
+          Array.isArray(tracks) && tracks.length
+            ? tracks
+            : [{ profile, events, color: '#8c3b2b', personIdx: 0 }];
+        const orderedTracks = allTracks
+          .slice()
+          .sort(
+            (a, b) => (isTrackDimmed(b.personIdx) ? 1 : 0) - (isTrackDimmed(a.personIdx) ? 1 : 0)
+          );
+        for (const tr of orderedTracks) {
+          const trProfile = tr.profile || profile || {};
+          const isScrapedBio = !trProfile.journeyKey && !trProfile.isRelic;
+          const trEvs = tr.events || [];
+          const segments = [];
+          const baseBias = isMulti ? (tr.personIdx - (allTracks.length - 1) * 0.5) * 7.5 : 0;
+          let prevPersonalEv = null;
+          let legCount = 0;
+          for (let i = 0; i < trEvs.length; i++) {
+            const nextEv = trEvs[i];
+            if (!nextEv || !Array.isArray(nextEv.coord)) continue;
+            if (this._isRemoteNonPersonalEvent(trProfile, nextEv)) continue;
+            if (!prevPersonalEv) {
+              prevPersonalEv = nextEv;
+              continue;
+            }
+            const yearGap = Math.abs((nextEv.year || 0) - (prevPersonalEv.year || 0));
+            if (isScrapedBio && !nextEv.fromCoord && yearGap > 12) {
+              prevPersonalEv = nextEv;
+              continue;
+            }
+            if (
+              Math.hypot(
+                prevPersonalEv.coord[0] - nextEv.coord[0],
+                prevPersonalEv.coord[1] - nextEv.coord[1]
+              ) <= 0.08
+            ) {
+              prevPersonalEv = nextEv;
+              continue;
+            }
+            const keepsCuratedLeg =
+              Boolean(nextEv.via || nextEv.fromCoord) &&
+              nextEv.prevStopCoord &&
+              Math.hypot(
+                prevPersonalEv.coord[0] - nextEv.prevStopCoord[0],
+                prevPersonalEv.coord[1] - nextEv.prevStopCoord[1]
+              ) < 1.2;
+            const segBias = baseBias + (legCount % 2 === 0 ? 2.2 : -2.2);
+            const segInfo = this._buildJourneySegmentInfo(
+              keepsCuratedLeg && Array.isArray(nextEv.fromCoord)
+                ? nextEv.fromCoord
+                : prevPersonalEv.coord,
+              nextEv.coord,
+              keepsCuratedLeg ? nextEv.via || null : null,
+              segBias
+            );
+            if (segInfo) {
+              segments.push({ ...segInfo, toIdx: i });
+              legCount++;
+            }
+            prevPersonalEv = nextEv;
+          }
+          if (segments.length) {
+            const trackColor = isMulti ? tr.color || '#9e3a26' : '#8c3b2b';
+            this._renderCartographicTrajectory(
+              segments,
+              -1,
+              trackColor,
+              isTrackDimmed(tr.personIdx)
+            );
+          }
+        }
+      } else if (!isMulti) {
         if (curIdx >= 0 && curEv) {
           if (soloOriginCoord) {
             const prevEv = !isStory && curIdx > 0 ? events[curIdx - 1] : null;
@@ -4345,20 +4430,26 @@
 
       if (curIdx < 0) {
         const fullD = segments.map((s) => s.d).join(' ');
-        applyDim(this._svgNode('path', { d: fullD, class: 'journey-track-halo' }, this.grpJourney));
         applyDim(
           this._svgNode(
             'path',
-            { d: fullD, class: 'journey-track-thread', stroke: accentColor },
+            { d: fullD, class: 'journey-track-halo is-overview' },
+            this.grpJourney
+          )
+        );
+        applyDim(
+          this._svgNode(
+            'path',
+            { d: fullD, class: 'journey-track-thread is-overview', stroke: accentColor },
             this.grpJourney
           )
         );
         const placedMarks = [];
         for (const seg of segments) {
-          if (seg.chord < 20) continue;
-          if (placedMarks.some(([px, py]) => Math.hypot(px - seg.mx, py - seg.my) < 15)) continue;
+          if (seg.chord < 28) continue;
+          if (placedMarks.some(([px, py]) => Math.hypot(px - seg.mx, py - seg.my) < 22)) continue;
           placedMarks.push([seg.mx, seg.my]);
-          appendChevron(seg, '');
+          appendChevron(seg, 'is-muted');
         }
         return;
       }

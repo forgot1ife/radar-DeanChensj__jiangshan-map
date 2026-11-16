@@ -3062,7 +3062,29 @@ async function runSearchRuntimeSuite(ctx) {
             ) === null,
           'Non-journey scraped solo events separated by >6 years must suppress misleading cross-country trajectory arrows'
         );
+        const dunhuangEv = wudiEvs.find((e) => e.siteZh.includes('敦煌'));
+        assert(
+          dunhuangEv && ctrl._isRemoteNonPersonalEvent(ctrl.activePerson.profile, dunhuangEv),
+          'Remote frontier commandery decrees (e.g. Emperor Wu establishing Dunhuang) must be recognized as non-personal events'
+        );
         ctrl.closeGenealogyCard();
+
+        // Curated journeys (zhangqian, sushi) must render overview trajectory threads (.journey-track-thread.is-overview)
+        for (const jk of ['zhangqian', 'sushi']) {
+          recordedSvg.length = 0;
+          ctrl.openPersonChronicle(jk, -1);
+          const ovThreads = recordedSvg.filter(
+            (n) =>
+              n.tag === 'path' &&
+              String(n.attrs.class || '').includes('journey-track-thread is-overview')
+          );
+          assert.strictEqual(
+            ovThreads.length,
+            1,
+            `Curated journey "${jk}" in overview mode must render a continuous .journey-track-thread.is-overview path`
+          );
+          ctrl.closeGenealogyCard();
+        }
       } finally {
         ctrl.locale = prevLoc;
         ctrl._svgNode = prevSvgNode;
